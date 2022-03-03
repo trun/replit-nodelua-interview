@@ -54,7 +54,7 @@ app.get('/status', (req, res) => {
   res.status(200).send('OK')
 })
 
-const retToValue = (ret: any): Value => {
+const retToValue = (ret: any, objects: Record<Reference, Object>): Value => {
   if (typeof ret === 'undefined') {
     return null
   }
@@ -72,7 +72,17 @@ const retToValue = (ret: any): Value => {
   }
 
   if (typeof ret === 'object') {
-    throw new Error('TODO tables are not implemented yet')
+    const refId = JSON.stringify(ret) // TODO should be have better id generation here?
+    const members = Object.entries(ret).map(([k, v]) => ({
+      key: retToValue(k, objects),
+      value: retToValue(v, objects)
+    }))
+
+    objects[refId] = {
+      members,
+    }
+
+    return { kind: 'ref', value: refId }
   }
 }
 
@@ -96,10 +106,12 @@ app.post('/eval/:session/lua', (req, res) => {
           error: err,
         })
       } else {
+        const objects: Record<Reference, Object> = {}
+        const value =  retToValue(ret, objects)
         res.status(200).send({
           success: true,
-          objects: {},
-          value: retToValue(ret),
+          objects,
+          value,
         })
       }
     } catch (e) {
