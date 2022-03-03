@@ -56,7 +56,7 @@ app.get('/status', (req, res) => {
   res.status(200).send('OK')
 })
 
-const retToValue = (ret: any, objects: Record<Reference, Object>, nextId: (() => number)): Value => {
+const retToValue = (ret: any, objects: Record<Reference, Object>, nextId: (() => number), refs: Record<Reference, any> = {}): Value => {
   if (typeof ret === 'undefined') {
     return null
   }
@@ -74,17 +74,25 @@ const retToValue = (ret: any, objects: Record<Reference, Object>, nextId: (() =>
   }
 
   if (typeof ret === 'object') {
-    const refId = nextId()
-    const members = Object.entries(ret).map(([k, v]) => ({
-      key: retToValue(k, objects, nextId),
-      value: retToValue(v, objects, nextId)
-    }))
+    const foundRef = Object.entries(refs).find(([refId, ref]) => ref === ret)
+    if (foundRef) {
+      return { kind: 'ref', value: String(foundRef[0]) }
+    } else {
+      const refId = nextId()
 
-    objects[refId] = {
-      members,
+      refs[refId] = ret
+
+      const members = Object.entries(ret).map(([k, v]) => ({
+        key: retToValue(k, objects, nextId, refs),
+        value: retToValue(v, objects, nextId, refs)
+      }))
+
+      objects[refId] = {
+        members,
+      }
+
+      return { kind: 'ref', value: String(refId) }
     }
-
-    return { kind: 'ref', value: String(refId) }
   }
 }
 
