@@ -48,6 +48,8 @@ type ObjectMember = {
 const luaSessions: { [session: string]: any } = {}
 const jsSessions: { [session: string]: Context } = {}
 
+const luaSessionLocks: { [session: string]: boolean } = {}
+
 const app = express()
 
 app.use(bodyParser.json())
@@ -106,6 +108,15 @@ const makeIdGenerator = (initialValue: number = 1): (() => number) => {
 app.post('/eval/:session/lua', (req, res) => {
   const session = req.params.session
 
+  // this isn't really "thread-safe", but it should never get interrupted in normal single threaded js execution
+  if (luaSessionLocks[session]) {
+    return res.status(500).send({
+      success: false,
+      error: `Could not obtain lock for session: ${session}`
+    })
+  }
+  luaSessionLocks[session] = true
+
   let context
   if (session in luaSessions) {
     context = luaSessions[session]
@@ -115,29 +126,39 @@ app.post('/eval/:session/lua', (req, res) => {
 
   const evalReq: EvalRequest = req.body
 
-  context.doString(evalReq.code, (err: any, ret: any) => {
-    try {
-      if (err) {
-        res.status(200).send({
-          success: false,
-          error: err,
-        })
-      } else {
-        const objects: Record<Reference, Object> = {}
-        const value =  retToValue(ret, objects, makeIdGenerator())
-        res.status(200).send({
-          success: true,
-          objects,
-          value,
+  try {
+    context.doString(evalReq.code, (err: any, ret: any) => {
+      luaSessionLocks[session] = false // we can unlock here, but in theory the FE still hasn't updated
+
+      try {
+        if (err) {
+          res.status(200).send({
+            success: false,
+            error: err,
+          })
+        } else {
+          const objects: Record<Reference, Object> = {}
+          const value = retToValue(ret, objects, makeIdGenerator())
+          res.status(200).send({
+            success: true,
+            objects,
+            value,
+          })
+        }
+      } catch (e) {
+        console.error('Caught exception evaluating lua return value', e)
+        res.status(500).send({
+          error: e.message
         })
       }
-    } catch (e) {
-      console.error('Caught exception evaluating lua return value', e)
-      res.status(500).send({
-        error: e.message
-      })
-    }
-  })
+    })
+  } catch (e) {
+    luaSessionLocks[session] = false
+    console.error('Caught exception evaluating lua script', e)
+    res.status(500).send({
+      error: e.message
+    })
+  }
 })
 
 app.post('/eval/:session/js', (req, res) => {
