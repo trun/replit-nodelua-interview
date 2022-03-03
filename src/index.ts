@@ -1,5 +1,6 @@
 import express from 'express'
 import * as bodyParser from 'body-parser'
+import vm, { Context } from 'vm'
 const LuaContext = require('node-luajit')
 
 type EvalRequest = {
@@ -44,7 +45,8 @@ type ObjectMember = {
 }
 
 // TODO why do i need to `any` type the LuaState
-const sessions: { [session: string]: any } = {}
+const luaSessions: { [session: string]: any } = {}
+const jsSessions: { [session: string]: Context } = {}
 
 const app = express()
 
@@ -89,16 +91,16 @@ const retToValue = (ret: any, objects: Record<Reference, Object>): Value => {
 app.post('/eval/:session/lua', (req, res) => {
   const session = req.params.session
 
-  let luaContext
-  if (session in sessions) {
-    luaContext = sessions[session]
+  let context
+  if (session in luaSessions) {
+    context = luaSessions[session]
   } else {
-    luaContext = sessions[session] = new LuaContext()
+    context = luaSessions[session] = new LuaContext()
   }
 
   const evalReq: EvalRequest = req.body
 
-  luaContext.doString(evalReq.code, (err: any, ret: any) => {
+  context.doString(evalReq.code, (err: any, ret: any) => {
     try {
       if (err) {
         res.status(200).send({
@@ -121,6 +123,36 @@ app.post('/eval/:session/lua', (req, res) => {
       })
     }
   })
+})
+
+app.post('/eval/:session/js', (req, res) => {
+  const session = req.params.session
+
+  let context: Context
+  if (session in jsSessions) {
+    context = jsSessions[session]
+  } else {
+    context = jsSessions[session] = vm.createContext({})
+  }
+
+  const evalReq: EvalRequest = req.body
+
+  try {
+    const ret = vm.runInContext(evalReq.code, context)
+    const objects: Record<Reference, Object> = {}
+    const value =  retToValue(ret, objects)
+    res.status(200).send({
+      success: true,
+      objects,
+      value,
+    })
+  } catch (e) {
+    console.error('Caught exception evaluating js return value', e)
+    res.status(500).send({
+      error: e.message
+    })
+  }
+
 })
 
 app.listen(3001, () => {
