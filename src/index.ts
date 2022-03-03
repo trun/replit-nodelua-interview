@@ -56,7 +56,7 @@ app.get('/status', (req, res) => {
   res.status(200).send('OK')
 })
 
-const retToValue = (ret: any, objects: Record<Reference, Object>): Value => {
+const retToValue = (ret: any, objects: Record<Reference, Object>, nextId: (() => number)): Value => {
   if (typeof ret === 'undefined') {
     return null
   }
@@ -74,17 +74,24 @@ const retToValue = (ret: any, objects: Record<Reference, Object>): Value => {
   }
 
   if (typeof ret === 'object') {
-    const refId = JSON.stringify(ret) // TODO should be have better id generation here?
+    const refId = nextId()
     const members = Object.entries(ret).map(([k, v]) => ({
-      key: retToValue(k, objects),
-      value: retToValue(v, objects)
+      key: retToValue(k, objects, nextId),
+      value: retToValue(v, objects, nextId)
     }))
 
     objects[refId] = {
       members,
     }
 
-    return { kind: 'ref', value: refId }
+    return { kind: 'ref', value: String(refId) }
+  }
+}
+
+const makeIdGenerator = (initialValue: number = 1): (() => number) => {
+  let x = initialValue
+  return (): number => {
+    return x++
   }
 }
 
@@ -109,7 +116,7 @@ app.post('/eval/:session/lua', (req, res) => {
         })
       } else {
         const objects: Record<Reference, Object> = {}
-        const value =  retToValue(ret, objects)
+        const value =  retToValue(ret, objects, makeIdGenerator())
         res.status(200).send({
           success: true,
           objects,
@@ -140,7 +147,7 @@ app.post('/eval/:session/js', (req, res) => {
   try {
     const ret = vm.runInContext(evalReq.code, context)
     const objects: Record<Reference, Object> = {}
-    const value =  retToValue(ret, objects)
+    const value =  retToValue(ret, objects, makeIdGenerator())
     res.status(200).send({
       success: true,
       objects,
